@@ -1,7 +1,6 @@
+from typing import Literal,Annotated
 
-from typing import Literal
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query,Path
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -19,6 +18,7 @@ router = APIRouter(
     tags=["Pipelines"]
 )
 
+POSTGRES_INTEGER_MAX = 2147483647
 
 # 1. Create pipeline
 @router.post("", response_model=PipelineOut, status_code=201)
@@ -68,7 +68,9 @@ def get_pipelines(
 # 3. Get one pipeline
 @router.get("/{pipeline_id}", response_model=PipelineOut)
 def get_pipeline(
-    pipeline_id: int,
+    pipeline_id:Annotated[
+    int,
+    Path(ge=1, le=POSTGRES_INTEGER_MAX)],
     db: Session = Depends(get_db)
 ) -> PipelineOut:
 
@@ -85,7 +87,9 @@ def get_pipeline(
 # 4. Update pipeline
 @router.patch("/{pipeline_id}", response_model=PipelineOut)
 def update_pipeline(
-    pipeline_id: int,
+    pipeline_id:Annotated[
+    int,
+    Path(ge=1, le=POSTGRES_INTEGER_MAX)],
     pipeline_data: PipelineUpdate,
     db: Session = Depends(get_db)
 ) -> PipelineOut:
@@ -113,7 +117,9 @@ def update_pipeline(
 # 5. Remove pipeline (soft delete)
 @router.delete("/{pipeline_id}", response_model=PipelineOut)
 def delete_pipeline(
-    pipeline_id: int,
+    pipeline_id:Annotated[
+    int,
+    Path(ge=1, le=POSTGRES_INTEGER_MAX)],
     db: Session = Depends(get_db)
 ) -> PipelineOut:
 
