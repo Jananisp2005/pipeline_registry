@@ -14,11 +14,6 @@ from app.schemas.pipeline import (
     PipelineListOut
 )
 
-from app.registry.exception import (
-    ArtifactNotFoundError,
-    VersionNotFoundError,
-    RegistryUnavailableError,
-)
 from app.schemas.pipeline import HeaderCheckResponse
 from app.services.pipeline_service import pipeline_service
 
@@ -184,7 +179,7 @@ def delete_pipeline(
         ) from exc
 
 
-
+# get schema
 @router.get("/{pipeline_id}/schema")
 def get_pipeline_schema(
     pipeline_id: int ,
@@ -192,7 +187,7 @@ def get_pipeline_schema(
 ):
     # Step 1: Get pipeline from PostgreSQL
     try:
-        pipeline = pipeline_service.get_pipeline(
+        return pipeline_service.get_pipeline_schema(
             db,
             pipeline_id
         )
@@ -203,42 +198,20 @@ def get_pipeline_schema(
             detail=str(exc)
         )
 
-    # Step 2: Fetch schema live from Apicurio
-    try:
-        result = pipeline_service.registry.get_schema(
-            group_id=pipeline.group_id,
-            artifact_id=pipeline.artifact_id,
-            version=pipeline.schema_version
-        )
-
-        # Step 3: Convert JSON string into Python dictionary
-        schema = json.loads(result["schema"])
-
-        # Step 4: Return response
-        return {
-            "pipeline_id": pipeline.id,
-            "group_id": pipeline.group_id,
-            "artifact_id": pipeline.artifact_id,
-            "requested_version": pipeline.schema_version,
-            "resolved_version": result["version"],
-            "schema": schema
-        }
-
-    except (ArtifactNotFoundError, VersionNotFoundError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-
-    except (SchemaNotFoundError, RegistryUnavailableServiceError) as exc:
+    except SchemaNotFoundError as exc:
         raise HTTPException(
-            status_code=503,
+            status_code=404,
             detail=str(exc)
         )
 
-    except json.JSONDecodeError:
+    except  RegistryUnavailableServiceError as exc:
         raise HTTPException(
-            status_code=502,
-            detail="Registry returned invalid JSON schema"
-        )
+            status_code=503,
+            detail=str(exc)
+        ) from exc
 
+
+# post schema
 @router.post(
     "/{pipeline_id}/check-header",
     response_model=HeaderCheckResponse
@@ -262,8 +235,8 @@ def check_pipeline_header(
             detail=str(exc)
         ) from exc
 
-    except (SchemaNotFoundError, RegistryUnavailableServiceError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=str(exc)
-        ) from exc
+    except SchemaNotFoundError as exc:
+       raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    except RegistryUnavailableServiceError as exc:
+       raise HTTPException(status_code=503, detail=str(exc)) from exc

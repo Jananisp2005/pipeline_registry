@@ -242,6 +242,47 @@ class PipelineService:
         except pipeline_crud.PipelineNotFoundError as exc:
             raise PipelineNotFoundError(str(exc)) from exc
 
+    
+    def get_pipeline_schema(
+        self,
+        db: Session,
+        pipeline_id: int
+    ) -> dict:
+
+        # Get pipeline from database (404 if not found)
+        pipeline = self.get_pipeline(db, pipeline_id)
+
+        try:
+            result = self.registry.get_schema(
+                group_id=pipeline.group_id,
+                artifact_id=pipeline.artifact_id,
+                version=pipeline.schema_version
+            )
+
+            schema = result["schema"]
+
+            if isinstance(schema, str):
+                schema = json.loads(schema)
+
+            return {
+                "pipeline_id": pipeline.id,
+                "group_id": pipeline.group_id,
+                "artifact_id": pipeline.artifact_id,
+                "requested_version": pipeline.schema_version,
+                "resolved_version": result["version"],
+                "schema": schema
+            }
+
+        except (ArtifactNotFoundError, VersionNotFoundError) as exc:
+            # Pipeline exists, but its Apicurio schema is missing.
+            raise SchemaNotFoundError(
+                f"Schema not found in registry: {exc}"
+            ) from exc
+
+        except RegistryUnavailableError as exc:
+            raise RegistryUnavailableServiceError(
+                f"Registry unavailable: {exc}"
+            ) from exc
 
     def check_header(
        self,
@@ -249,13 +290,13 @@ class PipelineService:
        pipeline_id: int,
        file: UploadFile
      ):
-        pipeline = self.get_pipeline(db, pipeline_id)
+        schema_response= self.get_pipeline_schema(db, pipeline_id)
 
-        schema_response = self.registry.get_schema(
-                group_id=pipeline.group_id,
-                artifact_id=pipeline.artifact_id,
-                version=pipeline.schema_version
-        )
+        # schema_response = self.registry.get_schema(
+        #         group_id=pipeline.group_id,
+        #         artifact_id=pipeline.artifact_id,
+        #         version=pipeline.schema_version
+        # )
 
         schema = schema_response["schema"]
 
@@ -307,13 +348,12 @@ class PipelineService:
         ]
 
     # Step 9: Check whether matching columns are in correct order
-        order_matches = (
-              len(found_columns) > 0
-              and [
-              column for column in found_columns
-              if column in expected_columns
-              ] == matches
-        )
+        common_in_file_order = [
+            column for column in found_columns
+            if column in expected_columns
+        ]
+
+        order_matches = bool(matches) and common_in_file_order == matches
 
         # Step 10: Check exact match including order
         exact_match = expected_columns == found_columns
