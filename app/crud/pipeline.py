@@ -148,3 +148,19 @@ def delete_pipeline(db: Session, pipeline_id: int) -> Pipeline:
     db.refresh(pipeline)
 
     return pipeline
+
+
+def pipeline_name_exists(
+    db: Session,
+    name: str,
+    exclude_id: int | None = None
+) -> bool:
+
+    query = db.query(Pipeline).filter(
+        Pipeline.name == name
+    )
+
+    if exclude_id is not None:
+        query = query.filter(Pipeline.id != exclude_id)
+
+    return query.first() is not None

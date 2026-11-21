@@ -1,17 +1,32 @@
-
 from typing import Literal
+import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query,UploadFile,File,Path
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+
 from app.schemas.pipeline import (
     PipelineCreate,
     PipelineUpdate,
     PipelineOut,
     PipelineListOut
 )
-from app.crud import pipeline as pipeline_crud
+
+from app.registry.exception import (
+    ArtifactNotFoundError,
+    VersionNotFoundError,
+    RegistryUnavailableError,
+)
+from app.schemas.pipeline import HeaderCheckResponse
+from app.services.pipeline_service import pipeline_service
+
+from app.services.exception import (
+    PipelineNotFoundError,
+    DuplicatePipelineError,
+    SchemaNotFoundError,
+    RegistryUnavailableServiceError,
+)
 
 
 router = APIRouter(
@@ -28,16 +43,31 @@ def create_pipeline(
 ) -> PipelineOut:
 
     try:
-        return pipeline_crud.create_pipeline(db, pipeline_data)
+        return pipeline_service.create_pipeline(
+            db,
+            pipeline_data
+        )
 
-    except pipeline_crud.PipelineNameAlreadyExistsError as exc:
+    except DuplicatePipelineError as exc:
         raise HTTPException(
             status_code=409,
             detail=str(exc)
         ) from exc
 
+    except SchemaNotFoundError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc)
+        ) from exc
 
-# 2. List pipelines with pagination and filters
+    except RegistryUnavailableServiceError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc)
+        ) from exc
+
+
+# 2. List pipelines
 @router.get("", response_model=PipelineListOut)
 def get_pipelines(
     limit: int = Query(default=10, ge=1, le=100),
@@ -48,7 +78,7 @@ def get_pipelines(
     db: Session = Depends(get_db)
 ) -> PipelineListOut:
 
-    pipelines, total = pipeline_crud.get_pipelines(
+    pipelines, total = pipeline_service.get_pipelines(
         db=db,
         limit=limit,
         offset=offset,
@@ -68,14 +98,17 @@ def get_pipelines(
 # 3. Get one pipeline
 @router.get("/{pipeline_id}", response_model=PipelineOut)
 def get_pipeline(
-    pipeline_id: int,
+    pipeline_id:int = Path(ge=1, le=2147483647),
     db: Session = Depends(get_db)
 ) -> PipelineOut:
 
     try:
-        return pipeline_crud.get_pipeline(db, pipeline_id)
+        return pipeline_service.get_pipeline(
+            db,
+            pipeline_id
+        )
 
-    except pipeline_crud.PipelineNotFoundError as exc:
+    except PipelineNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail=str(exc)
@@ -85,45 +118,143 @@ def get_pipeline(
 # 4. Update pipeline
 @router.patch("/{pipeline_id}", response_model=PipelineOut)
 def update_pipeline(
-    pipeline_id: int,
     pipeline_data: PipelineUpdate,
+    pipeline_id: int ,
     db: Session = Depends(get_db)
 ) -> PipelineOut:
 
     try:
-        return pipeline_crud.update_pipeline(
+        return pipeline_service.update_pipeline(
             db,
             pipeline_id,
             pipeline_data
         )
 
-    except pipeline_crud.PipelineNotFoundError as exc:
+    except PipelineNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail=str(exc)
         ) from exc
 
-    except pipeline_crud.PipelineNameAlreadyExistsError as exc:
+    except DuplicatePipelineError as exc:
         raise HTTPException(
             status_code=409,
             detail=str(exc)
         ) from exc
 
+    except SchemaNotFoundError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc)
+        ) from exc
 
-# 5. Remove pipeline (soft delete)
+    except RegistryUnavailableServiceError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc)
+        ) from exc
+
+
+# 5. Delete pipeline (soft delete)
 @router.delete("/{pipeline_id}", response_model=PipelineOut)
 def delete_pipeline(
-    pipeline_id: int,
+    pipeline_id: int ,
     db: Session = Depends(get_db)
 ) -> PipelineOut:
 
     try:
-        # Soft delete: the row remains with status inactive.
-        # Repeating this request returns the already inactive pipeline.
-        return pipeline_crud.delete_pipeline(db, pipeline_id)
+        return pipeline_service.delete_pipeline(
+            db,
+            pipeline_id
+        )
 
-    except pipeline_crud.PipelineNotFoundError as exc:
+    except PipelineNotFoundError as exc:
         raise HTTPException(
             status_code=404,
+            detail=str(exc)
+        ) from exc
+
+
+
+@router.get("/{pipeline_id}/schema")
+def get_pipeline_schema(
+    pipeline_id: int ,
+    db: Session = Depends(get_db)
+):
+    # Step 1: Get pipeline from PostgreSQL
+    try:
+        pipeline = pipeline_service.get_pipeline(
+            db,
+            pipeline_id
+        )
+
+    except PipelineNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc)
+        )
+
+    # Step 2: Fetch schema live from Apicurio
+    try:
+        result = pipeline_service.registry.get_schema(
+            group_id=pipeline.group_id,
+            artifact_id=pipeline.artifact_id,
+            version=pipeline.schema_version
+        )
+
+        # Step 3: Convert JSON string into Python dictionary
+        schema = json.loads(result["schema"])
+
+        # Step 4: Return response
+        return {
+            "pipeline_id": pipeline.id,
+            "group_id": pipeline.group_id,
+            "artifact_id": pipeline.artifact_id,
+            "requested_version": pipeline.schema_version,
+            "resolved_version": result["version"],
+            "schema": schema
+        }
+
+    except (ArtifactNotFoundError, VersionNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    except (SchemaNotFoundError, RegistryUnavailableServiceError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc)
+        )
+
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=502,
+            detail="Registry returned invalid JSON schema"
+        )
+
+@router.post(
+    "/{pipeline_id}/check-header",
+    response_model=HeaderCheckResponse
+)
+def check_pipeline_header(
+    pipeline_id: int ,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        
+       return pipeline_service.check_header(
+         db,
+         pipeline_id,
+         file
+        )
+
+    except PipelineNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc)
+        ) from exc
+
+    except (SchemaNotFoundError, RegistryUnavailableServiceError) as exc:
+        raise HTTPException(
+            status_code=503,
             detail=str(exc)
         ) from exc

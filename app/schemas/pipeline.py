@@ -144,3 +144,12 @@ class PipelineListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+class HeaderCheckResponse(BaseModel):
+    pipeline_id: int
+    matches: list[str]
+    expected_columns: list[str]
+    found_columns: list[str]
+    missing: list[str]
+    extra: list[str]
+    order_matches: bool
