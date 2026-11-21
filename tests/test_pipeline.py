@@ -18,7 +18,7 @@ BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000/pipelines").rstrip("
 REGISTRY_URL = os.getenv("REGISTRY_URL", "http://localhost:8080/apis/registry/v3").rstrip("/")
 REGISTRY_TIMEOUT = float(os.getenv("REGISTRY_TIMEOUT_SECONDS", "5"))
 REQUEST_TIMEOUT = max(10, REGISTRY_TIMEOUT + 3)
-TEST_SCHEMA_FIELDS = [x.strip() for x in os.getenv("TEST_SCHEMA_FIELDS", "id,name,email").split(",") if x.strip()]
+TEST_SCHEMA_FIELDS = [x.strip() for x in os.getenv("TEST_SCHEMA_FIELDS", "name,phone,dob,fees,hostel,email,blood_group").split(",") if x.strip()]
 DATA_DIR = Path(__file__).parent / "data"
 DOWN_ID_FILE = Path(__file__).parent / ".registry_down_pipeline_id"
 
@@ -128,7 +128,7 @@ def get_schema(pipeline_id):
 def check_csv_headers(pipeline_id):
     csv_files = sorted(DATA_DIR.glob("*.csv"))
     check("tests/data has CSV files", bool(csv_files))
-    expected_fields = TEST_SCHEMA_FIELDS + ["phone", "country"]
+    expected_fields = TEST_SCHEMA_FIELDS #+ ["phone", "country"]
     for csv_path in csv_files:
         with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
             headers = next(csv.reader(handle), [])
