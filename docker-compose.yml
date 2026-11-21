@@ -1,0 +1,63 @@
+# Apicurio Registry hands-on lab
+# Three containers:
+#   postgres  - stores the registry's data, so schemas survive a restart
+#   registry  - the Apicurio Registry itself (REST API on port 8080)
+#   ui        - the web page for humans (port 8888)
+#
+# Start:  docker compose up -d
+# Stop:   docker compose down          (keeps your data)
+# Wipe:   docker compose down -v       (deletes the database volume too)
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: apicurio
+      POSTGRES_USER: apicurio
+      POSTGRES_PASSWORD: apicurio
+    volumes:
+      - apicurio-pg-data:/var/lib/postgresql/data
+    # No "ports:" on purpose: only the registry talks to this database,
+    # and this avoids a clash with the Postgres you already run on 5432.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apicurio -d apicurio"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  registry:
+    # "latest" is the newest stable release. Once you have it working,
+    # replace it with the exact version number shown on Docker Hub (for example 3.x.y)
+    # and use the same number for the ui image below.
+    image: apicurio/apicurio-registry:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Keep the data in Postgres instead of in memory
+      APICURIO_STORAGE_KIND: sql
+      APICURIO_STORAGE_SQL_KIND: postgresql
+      APICURIO_DATASOURCE_URL: jdbc:postgresql://postgres:5432/apicurio
+      APICURIO_DATASOURCE_USERNAME: apicurio
+      APICURIO_DATASOURCE_PASSWORD: apicurio
+      # Deleting is switched off by default in Apicurio 3. We switch it on for practice.
+      APICURIO_REST_DELETION_ARTIFACT_ENABLED: "true"
+      APICURIO_REST_DELETION_ARTIFACT_VERSION_ENABLED: "true"
+      APICURIO_REST_DELETION_GROUP_ENABLED: "true"
+      # Let the web page on port 8888 call the API on port 8080
+      QUARKUS_HTTP_CORS_ORIGINS: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ui:
+    image: apicurio/apicurio-registry-ui:latest
+    ports:
+      - "8888:8080"
+    environment:
+      # The web page runs in YOUR browser, so it must reach the API at localhost
+      REGISTRY_API_URL: http://localhost:8080/apis/registry/v3
+    depends_on:
+      - registry
+
+volumes:
+  apicurio-pg-data:
