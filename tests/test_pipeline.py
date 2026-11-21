@@ -77,19 +77,6 @@ def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-# def avro_schema(fields, add_phone=False, add_country=False):
-#     fields_data = [
-#         {"name": name, "type": ["null", "string"], "default": None}
-#         for name in fields
-#     ]
-#     if add_phone:
-#         fields_data.append({"name": "phone", "type": ["null", "string"], "default": None})
-#     if add_country:
-#         fields_data.append({"name": "country", "type": ["null", "string"], "default": None})
-#     return {"type": "record", "name": "PipelineTestRecord",
-#             "namespace": "com.example.pipeline.test", "fields": fields_data}
-
-
 def avro_schema(fields, add_phone=False, add_country=False):
     schema_fields = list(fields)
 
@@ -150,61 +137,6 @@ def add_third_version():
 def get_schema(pipeline_id):
     return requests.get(f"{BASE_URL}/{pipeline_id}/schema", timeout=REQUEST_TIMEOUT)
 
-
-# def check_csv_headers(pipeline_id):
-#     csv_files = sorted(DATA_DIR.glob("*.csv"))
-#     check("tests/data has CSV files", bool(csv_files))
-#     expected_fields = TEST_SCHEMA_FIELDS #+ ["phone", "country"]
-#     for csv_path in csv_files:
-#         with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
-#             headers = next(csv.reader(handle), [])
-#         # expected = {
-#         #     "matches": [h for h in headers if h in expected_fields],
-#         #     "missing": [h for h in expected_fields if h not in headers],
-#         #     "extra": [h for h in headers if h not in expected_fields],
-#         #     "order_matches": [h for h in headers if h in expected_fields] == [h for h in expected_fields if h in headers],
-#         # }
-#         matched_fields = [
-#             field for field in expected_fields if field in headers
-#         ]
-
-#         expected = {
-#             "matches": matched_fields,
-#             "missing": [
-#                 field for field in expected_fields if field not in headers
-#             ],
-#             "extra": [
-#                 field for field in headers if field not in expected_fields
-#             ],
-#             "order_matches": bool(headers) and headers == expected_fields,
-#         }
-
-#         with csv_path.open("rb") as handle:
-#             result = requests.post(
-#                 f"{BASE_URL}/{pipeline_id}/check-header",
-#                 files={"file": (csv_path.name, handle, "text/csv")},
-#                 timeout=REQUEST_TIMEOUT,
-#             )
-#         check(f"Header check {csv_path.name} returns 200", result.status_code == 200)
-
-#         # if result.status_code == 200:
-#         #     for key, value in expected.items():
-#         #         check(f"{csv_path.name}: {key} matches expected result", result.json().get(key) == value)
-         
-#         if result.status_code == 200:
-#              actual = result.json()
-
-#              for key, value in expected.items():
-#                 actual_value = actual.get(key)
-
-#                 check(
-#                     f"{csv_path.name}: {key} matches expected result",
-#                     actual_value == value
-#                 )
-
-#                 if actual_value != value:
-#                     print(f"Expected {key}: {value!r}")
-#                     print(f"Actual   {key}: {actual_value!r}")
 
 def check_csv_headers(pipeline_id):
     csv_files = sorted(DATA_DIR.glob("*.csv"))
