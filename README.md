@@ -390,12 +390,15 @@ The header check identifies matching columns, missing columns, extra columns, an
 | Pipeline created | 201 | Creation successful |
 | Request successful | 200 | Operation successful |
 | Pipeline not found | 404 | Requested pipeline does not exist |
+| Referenced Apicurio schema not found | 404 | Pipeline exists, but its referenced artifact or schema has been deleted from Apicurio |
 | Duplicate pipeline name | 409 | Pipeline name already exists |
 | Invalid request or field validation | 422 | Request data is invalid |
-| Apicurio artifact does not exist | 422 | Requested artifact cannot be validated |
-| Requested schema version does not exist | 422 | Requested version cannot be found |
+| Apicurio artifact does not exist during pipeline creation | 422 | Requested artifact cannot be validated |
+| Requested schema version does not exist during pipeline creation | 422 | Requested version cannot be found |
 | Apicurio Registry unavailable | 503 | Registry service is unavailable |
 | Registry response is invalid | 502 | Registry returned invalid JSON |
+
+**Schema not found decision:** If a pipeline exists in PostgreSQL but its referenced artifact or schema is missing from Apicurio, both `GET /pipelines/{id}/schema` and `POST /pipelines/{id}/check-header` return `404 Not Found`. The pipeline record still exists; only its referenced schema resource is missing.
 
 Validation failures must not create or modify pipeline records in PostgreSQL.
 

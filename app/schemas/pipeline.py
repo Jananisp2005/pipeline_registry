@@ -150,3 +150,4 @@ class HeaderCheckResponse(BaseModel):
     missing: list[str]
     extra: list[str]
     order_matches: bool
+    exact_match:bool
