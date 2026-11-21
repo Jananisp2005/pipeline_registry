@@ -17,6 +17,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    print("shutdown")
+
 app = FastAPI(
     title="Pipeline Registry API",
     description="API for managing pipelines",

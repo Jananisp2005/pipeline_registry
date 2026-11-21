@@ -1,4 +1,3 @@
-
 import re
 from datetime import datetime
 
@@ -12,7 +11,6 @@ RESERVED_TABLE_NAMES = {
     "order",
     "group"
 }
-
 
 class PipelineCreate(BaseModel):
     name: str = Field(min_length=3, max_length=50)
@@ -30,7 +28,7 @@ class PipelineCreate(BaseModel):
                 "Name must contain only lowercase letters, digits and hyphens"
             )
         return value
-
+ 
     @field_validator("group_id", "artifact_id")
     @classmethod
     def validate_identifier(cls, value: str) -> str:
@@ -60,7 +58,6 @@ class PipelineCreate(BaseModel):
             raise ValueError("This is a reserved SQL word")
 
         return value
-
 
 
 class PipelineUpdate(BaseModel):
