@@ -1,3 +1,5 @@
+import asyncio
+
 from app.config import settings
 from app.registry.client import ApicurioClient
 from app.registry.exception import (
@@ -6,15 +8,13 @@ from app.registry.exception import (
     VersionNotFoundError,
 )
 
-client = ApicurioClient(settings)
-
 GROUP_ID = "college"
 ARTIFACT_ID = "admission-form"
 
 
-def run_test(description, function):
+async def run_test(description, function):
     try:
-        result = function()
+        result = await function()
         print(f"PASS: {description}")
         print("Result:", result)
         return result
@@ -33,48 +33,54 @@ def run_test(description, function):
         print("Error:", exc)
 
 
-try:
-    # 1. Existing artifact
-    run_test(
-        "Existing artifact",
-        lambda: client.artifact_exists(
-            GROUP_ID, ARTIFACT_ID
-        )
-    )
+async def main():
 
-    # 2. Misspelled artifact
-    run_test(
-        "Misspelled artifact",
-        lambda: (
-            client.artifact_exists(
+    client = ApicurioClient(settings)
+
+    try:
+        # 1. Existing artifact
+        await run_test(
+            "Existing artifact",
+            lambda: client.artifact_exists(
+                GROUP_ID, ARTIFACT_ID
+            )
+        )
+
+        # 2. Misspelled artifact
+        await run_test(
+            "Misspelled artifact",
+            lambda: client.artifact_exists(
                 GROUP_ID, "admission-form-xyz"
             )
         )
-    )
 
-    # 3. Existing version
-    run_test(
-        "Fetch version 1",
-        lambda: client.get_schema(
-            GROUP_ID, ARTIFACT_ID, 1
+        # 3. Existing version
+        await run_test(
+            "Fetch version 1",
+            lambda: client.get_schema(
+                GROUP_ID, ARTIFACT_ID, 1
+            )
         )
-    )
 
-    # 4. Latest version
-    run_test(
-        "Fetch latest version",
-        lambda: client.get_schema(
-            GROUP_ID, ARTIFACT_ID, "latest"
+        # 4. Latest version
+        await run_test(
+            "Fetch latest version",
+            lambda: client.get_schema(
+                GROUP_ID, ARTIFACT_ID, "latest"
+            )
         )
-    )
 
-    # 5. Non-existing version
-    run_test(
-        "Non-existing version",
-        lambda: client.get_schema(
-            GROUP_ID, ARTIFACT_ID, 999
+        # 5. Non-existing version
+        await run_test(
+            "Non-existing version",
+            lambda: client.get_schema(
+                GROUP_ID, ARTIFACT_ID, 999
+            )
         )
-    )
 
-finally:
-    client.close()
+    finally:
+        await client.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

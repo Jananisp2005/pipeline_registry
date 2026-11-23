@@ -1,10 +1,9 @@
-from sqlalchemy.orm import Session
 import csv,json
-from collections import Counter
-from fastapi import UploadFile
-from app.config import settings
-from app.crud import pipeline as pipeline_crud
 
+from fastapi import UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.crud import pipeline as pipeline_crud
 from app.registry.client import ApicurioClient
 from app.registry.exception import (
     RegistryUnavailableError,
@@ -25,11 +24,11 @@ from app.schemas.pipeline import PipelineCreate, PipelineUpdate
 class PipelineService:
 
     def __init__(self):
-        # Create one reusable Apicurio client
-        self.registry = ApicurioClient(settings)
+        # Registry client is initialized during application startup.
+        self.registry: ApicurioClient | None = None
 
     # Common registry validation
-    def _validate_schema(
+    async def _validate_schema(
         self,
         group_id: str,
         artifact_id: str,
@@ -37,8 +36,7 @@ class PipelineService:
     ) -> dict:
 
         try:
-            # Step 1: Check artifact
-            exists = self.registry.artifact_exists(
+            exists = await self.registry.artifact_exists(
                 group_id,
                 artifact_id
             )
@@ -48,8 +46,7 @@ class PipelineService:
                     f"Artifact '{artifact_id}' not found in registry"
                 )
 
-            # Step 2: Fetch requested schema version
-            return self.registry.get_schema(
+            return await self.registry.get_schema(
                 group_id,
                 artifact_id,
                 version
@@ -66,14 +63,13 @@ class PipelineService:
             ) from exc
 
     # Create pipeline
-    def create_pipeline(
+    async def create_pipeline(
         self,
-        db: Session,
+        db: AsyncSession,
         pipeline_data: PipelineCreate
     ):
 
-        # Step 1: Check duplicate name in database
-        if pipeline_crud.pipeline_name_exists(
+        if await pipeline_crud.pipeline_name_exists(
             db,
             pipeline_data.name
         ):
@@ -81,35 +77,25 @@ class PipelineService:
                 f"Pipeline name '{pipeline_data.name}' already exists"
             )
 
-        # Step 2 and 3: Validate artifact and schema version
-        schema_result = self._validate_schema(
+        await self._validate_schema(
             pipeline_data.group_id,
             pipeline_data.artifact_id,
             pipeline_data.schema_version
         )
 
-        # Step 4: Store actual version instead of 'latest'
-        # actual_version = str(schema_result["version"])
-
-        # pipeline_data = pipeline_data.model_copy(
-        #     update={"schema_version": actual_version}
-        # )
-
-        # Step 5: Insert into database
         try:
-            return pipeline_crud.create_pipeline(
+            return await pipeline_crud.create_pipeline(
                 db,
                 pipeline_data
             )
 
         except pipeline_crud.PipelineNameAlreadyExistsError as exc:
-            # Handles duplicate-name race conditions
             raise DuplicatePipelineError(str(exc)) from exc
 
     # List pipelines
-    def get_pipelines(
+    async def get_pipelines(
         self,
-        db: Session,
+        db: AsyncSession,
         limit: int = 10,
         offset: int = 0,
         status: str | None = None,
@@ -117,7 +103,7 @@ class PipelineService:
         search: str | None = None
     ):
 
-        return pipeline_crud.get_pipelines(
+        return await pipeline_crud.get_pipelines(
             db,
             limit,
             offset,
@@ -127,14 +113,14 @@ class PipelineService:
         )
 
     # Get one pipeline
-    def get_pipeline(
+    async def get_pipeline(
         self,
-        db: Session,
+        db: AsyncSession,
         pipeline_id: int
     ):
 
         try:
-            return pipeline_crud.get_pipeline(
+            return await pipeline_crud.get_pipeline(
                 db,
                 pipeline_id
             )
@@ -143,16 +129,15 @@ class PipelineService:
             raise PipelineNotFoundError(str(exc)) from exc
 
     # Update pipeline
-    def update_pipeline(
+    async def update_pipeline(
         self,
-        db: Session,
+        db: AsyncSession,
         pipeline_id: int,
         pipeline_data: PipelineUpdate
     ):
 
         try:
-            # First get existing pipeline
-            existing = pipeline_crud.get_pipeline(
+            existing = await pipeline_crud.get_pipeline(
                 db,
                 pipeline_id
             )
@@ -164,9 +149,8 @@ class PipelineService:
             exclude_unset=True
         )
 
-        # Check duplicate name before registry validation
         if "name" in update_data:
-            if pipeline_crud.pipeline_name_exists(
+            if await pipeline_crud.pipeline_name_exists(
                 db,
                 update_data["name"],
                 exclude_id=pipeline_id
@@ -175,7 +159,6 @@ class PipelineService:
                     f"Pipeline name '{update_data['name']}' already exists"
                 )
 
-        # Validate registry only if a schema reference changes
         registry_fields = {
             "group_id",
             "artifact_id",
@@ -184,7 +167,6 @@ class PipelineService:
 
         if registry_fields.intersection(update_data):
 
-            # Build the final combination of registry values
             group_id = update_data.get(
                 "group_id", existing.group_id
             )
@@ -197,24 +179,18 @@ class PipelineService:
                 "schema_version", existing.schema_version
             )
 
-            schema_result = self._validate_schema(
+            await self._validate_schema(
                 group_id,
                 artifact_id,
                 version
             )
 
-            # # Save the real version number
-            # update_data["schema_version"] = str(
-            #     schema_result["version"]
-            # )
-
-        # Rebuild the update schema
         updated_data = PipelineUpdate.model_validate(
             update_data
         )
 
         try:
-            return pipeline_crud.update_pipeline(
+            return await pipeline_crud.update_pipeline(
                 db,
                 pipeline_id,
                 updated_data
@@ -227,14 +203,14 @@ class PipelineService:
             raise DuplicatePipelineError(str(exc)) from exc
 
     # Delete pipeline (soft delete)
-    def delete_pipeline(
+    async def delete_pipeline(
         self,
-        db: Session,
+        db: AsyncSession,
         pipeline_id: int
     ):
 
         try:
-            return pipeline_crud.delete_pipeline(
+            return await pipeline_crud.delete_pipeline(
                 db,
                 pipeline_id
             )
@@ -242,18 +218,17 @@ class PipelineService:
         except pipeline_crud.PipelineNotFoundError as exc:
             raise PipelineNotFoundError(str(exc)) from exc
 
-    
-    def get_pipeline_schema(
+    # Get pipeline schema
+    async def get_pipeline_schema(
         self,
-        db: Session,
+        db: AsyncSession,
         pipeline_id: int
     ) -> dict:
 
-        # Get pipeline from database (404 if not found)
-        pipeline = self.get_pipeline(db, pipeline_id)
+        pipeline = await self.get_pipeline(db, pipeline_id)
 
         try:
-            result = self.registry.get_schema(
+            result = await self.registry.get_schema(
                 group_id=pipeline.group_id,
                 artifact_id=pipeline.artifact_id,
                 version=pipeline.schema_version
@@ -274,7 +249,6 @@ class PipelineService:
             }
 
         except (ArtifactNotFoundError, VersionNotFoundError) as exc:
-            # Pipeline exists, but its Apicurio schema is missing.
             raise SchemaNotFoundError(
                 f"Schema not found in registry: {exc}"
             ) from exc
@@ -284,78 +258,79 @@ class PipelineService:
                 f"Registry unavailable: {exc}"
             ) from exc
 
-    def check_header(
-       self,
-       db,
-       pipeline_id: int,
-       file: UploadFile
-     ):
-        schema_response= self.get_pipeline_schema(db, pipeline_id)
+    # Check CSV header
+    async def check_header(
+        self,
+        db: AsyncSession,
+        pipeline_id: int,
+        file: UploadFile
+    ):
 
-        # schema_response = self.registry.get_schema(
-        #         group_id=pipeline.group_id,
-        #         artifact_id=pipeline.artifact_id,
-        #         version=pipeline.schema_version
-        # )
+        schema_response = await self.get_pipeline_schema(
+            db,
+            pipeline_id
+        )
 
         schema = schema_response["schema"]
 
-
-        # Convert JSON string into Python dictionary
         if isinstance(schema, str):
-           schema = json.loads(schema)
+            schema = json.loads(schema)
 
-    # Step 2: Extract expected column names
         expected_columns = [
-              field["name"]
-              for field in schema.get("fields", [])
+            field["name"]
+            for field in schema.get("fields", [])
         ]
 
-        # print("SCHEMA:", schema)
-        # print("SCHEMA TYPE:", type(schema))
-        # print("SCHEMA KEYS:", schema.keys())
+        # Read the first 64 KB asynchronously.
+        chunk_size = 64 * 1024
+        header_data = await file.read(chunk_size)
 
-    # Step 3: Read ONLY the first line
-        first_line = file.file.readline()
+        # If the first line is longer than 64 KB,
+        # continue reading until newline or EOF.
+        while b"\n" not in header_data and len(header_data) == chunk_size:
+            chunk = await file.read(chunk_size)
+            if not chunk:
+                break
+            header_data += chunk
 
-    # Step 4: Decode UTF-8 and remove BOM if present
-        header_text = first_line.decode("utf-8-sig")
+        # Extract only the first line.
+        first_line = header_data.split(b"\n", 1)[0]
 
-    # Step 5: Parse CSV header using csv module
+        # Decode UTF-8 and remove BOM.
+        header_text = first_line.decode("utf-8-sig").rstrip("\r")
+
         reader = csv.reader([header_text])
-
         found_columns = next(reader, [])
 
-    # Step 6: Find missing columns
         missing = [
-           column
-           for column in expected_columns
-           if column not in found_columns
+            column
+            for column in expected_columns
+            if column not in found_columns
         ]
 
-    # Step 7: Find extra columns
         extra = [
-           column
-           for column in found_columns
-           if column not in expected_columns
+            column
+            for column in found_columns
+            if column not in expected_columns
         ]
 
-    ## Step 8: Find matching columns in expected schema order
         matches = [
-           column
-           for column in expected_columns
-           if column in found_columns
+            column
+            for column in expected_columns
+            if column in found_columns
         ]
 
-    # Step 9: Check whether matching columns are in correct order
         common_in_file_order = [
-            column for column in found_columns
+            column
+            for column in found_columns
             if column in expected_columns
         ]
 
-        order_matches = bool(matches) and common_in_file_order == matches
+        order_matches = (
+            bool(matches)
+            and common_in_file_order == matches
+        )
 
-        # Step 10: Check exact match including order
         exact_match = expected_columns == found_columns
 
         print("EXPECTED:", expected_columns)
@@ -365,16 +340,16 @@ class PipelineService:
         print("ORDER MATCHES:", order_matches)
 
         return {
-        "pipeline_id": pipeline_id,
-        "matches": matches,
-        "expected_columns": expected_columns,
-        "found_columns": found_columns,
-        "missing": missing,
-        "extra": extra,
-        "order_matches": order_matches,
-        "exact_match": exact_match
-       }
-        
+            "pipeline_id": pipeline_id,
+            "matches": matches,
+            "expected_columns": expected_columns,
+            "found_columns": found_columns,
+            "missing": missing,
+            "extra": extra,
+            "order_matches": order_matches,
+            "exact_match": exact_match
+        }
+
 
 # One reusable service instance
 pipeline_service = PipelineService()

@@ -1,4 +1,4 @@
-import requests
+import httpx
 
 from app.registry.exception import (
     RegistryUnavailableError,
@@ -6,26 +6,23 @@ from app.registry.exception import (
     VersionNotFoundError,
 )
 
-
 class ApicurioClient:
 
     def __init__(self, settings):
         self.base_url = settings.REGISTRY_URL.rstrip("/")
         self.timeout = settings.REGISTRY_TIMEOUT_SECONDS
 
-        # Create one reusable session
-        self.session = requests.Session()
+        # Create one reusable async client
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.timeout
+        )
 
-    def _request(self, endpoint):
-        url = f"{self.base_url}{endpoint}"
-
+    async def _request(self, endpoint):
         try:
-            response = self.session.get(
-                url,
-                timeout=self.timeout
-            )
+            response = await self.client.get(endpoint)
 
-        except (requests.ConnectionError, requests.Timeout) as exc:
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise RegistryUnavailableError(
                 f"Cannot connect to Apicurio Registry: {exc}"
             ) from exc
@@ -37,13 +34,13 @@ class ApicurioClient:
 
         return response
 
-    def artifact_exists(self, group_id, artifact_id):
+    async def artifact_exists(self, group_id, artifact_id):
 
         endpoint = (
             f"/groups/{group_id}/artifacts/{artifact_id}"
         )
 
-        response = self._request(endpoint)
+        response = await self._request(endpoint)
 
         if response.status_code == 404:
             return False
@@ -53,7 +50,7 @@ class ApicurioClient:
 
         response.raise_for_status()
 
-    def get_schema(self, group_id, artifact_id, version):
+    async def get_schema(self, group_id, artifact_id, version):
 
         base_endpoint = (
             f"/groups/{group_id}/artifacts/{artifact_id}"
@@ -70,10 +67,10 @@ class ApicurioClient:
                 f"{base_endpoint}/{version}"
             )
 
-        metadata_response = self._request(metadata_endpoint)
+        metadata_response = await self._request(metadata_endpoint)
 
         if metadata_response.status_code == 404:
-            if self.artifact_exists(group_id, artifact_id):
+            if await self.artifact_exists(group_id, artifact_id):
                 raise VersionNotFoundError(
                     f"Version {version} does not exist"
                 )
@@ -92,7 +89,7 @@ class ApicurioClient:
             f"{base_endpoint}/{actual_version}/content"
         )
 
-        content_response = self._request(content_endpoint)
+        content_response = await self._request(content_endpoint)
 
         if content_response.status_code == 404:
             raise VersionNotFoundError(
@@ -106,5 +103,5 @@ class ApicurioClient:
             "version": actual_version
         }
 
-    def close(self):
-        self.session.close()
+    async def close(self):
+        await self.client.aclose()
